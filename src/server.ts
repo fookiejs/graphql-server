@@ -10,6 +10,10 @@ import { ModelGraph } from "./registry.ts";
 import type { RegisteredModelDef } from "./registry.ts";
 import { GraphqlServerError } from "./errors.ts";
 import { loopbackHost, nameSlotOf, readRequest, sendJson, variablesOf } from "./transport.ts";
+import { headersOf, roomsFromUrl } from "./transport.ts";
+import { RoomHub } from "./subscribe/hub.ts";
+import type { SettledEvent } from "./subscribe/hub.ts";
+import { openStream, sseSink } from "./subscribe/sse.ts";
 
 export type SnapshotPort = {
   withReadSnapshot<T>(run: (scope: ReadPort) => Promise<T>): Promise<T>;
@@ -21,19 +25,41 @@ export type FookieApp = ReadPort &
     models(): readonly RegisteredModelDef[];
   };
 
+export type AuthorizeRooms = (
+  headers: Record<string, readonly string[]>,
+  rooms: readonly string[],
+) => Promise<readonly string[]>;
+
+export type SubscriptionConfig = {
+  authorizeRooms: AuthorizeRooms;
+};
+
+export type SettledSource = {
+  onOperationSettled(listener: (event: SettledEvent) => void): { stop(): boolean };
+};
+
 export type GraphqlServerOptions = {
   port: readonly string[];
   limits: readonly PrefetchLimits[];
   snapshot: boolean;
+  subscriptions: readonly SubscriptionConfig[];
 };
 
 export function defaultOptions(): GraphqlServerOptions {
-  const options: GraphqlServerOptions = { port: [], limits: [], snapshot: true };
+  const options: GraphqlServerOptions = {
+    port: [],
+    limits: [],
+    snapshot: true,
+    subscriptions: [],
+  };
   if (options.port.length > 0) {
     throw GraphqlServerError.create("default options carry no port");
   }
   if (options.snapshot === false) {
     throw GraphqlServerError.create("snapshot reads are the default");
+  }
+  if (options.subscriptions.length > 0) {
+    throw GraphqlServerError.create("subscriptions are off unless configured");
   }
   return options;
 }
@@ -50,6 +76,12 @@ function listenPortOf(port: readonly string[]): readonly number[] {
     return [parsed];
   }
   return [];
+}
+
+function closerFor(membership: { stop(): boolean }): () => void {
+  return () => {
+    membership.stop();
+  };
 }
 
 function closeServer(server: http.Server): Promise<boolean> {
@@ -75,6 +107,9 @@ export class GraphqlServer {
   private readonly limits: PrefetchLimits;
   private readonly snapshot: boolean;
   private readonly serverBox: { servers: readonly http.Server[] } = { servers: [] };
+  private readonly hub = new RoomHub();
+  private readonly subscriptions: readonly SubscriptionConfig[];
+  private readonly settledBox: { stops: readonly { stop(): boolean }[] } = { stops: [] };
 
   private constructor(app: FookieApp, options: GraphqlServerOptions) {
     if (app.models().length < 1) {
@@ -85,6 +120,30 @@ export class GraphqlServer {
     this.bundle = buildSchema(this.graph);
     this.limits = firstLimits(options.limits);
     this.snapshot = options.snapshot;
+    this.subscriptions = options.subscriptions;
+  }
+
+  watch(source: SettledSource): boolean {
+    if (this.subscriptions.length < 1) {
+      throw GraphqlServerError.create(
+        "configure subscriptions with authorizeRooms before watching for events",
+      );
+    }
+    if (this.settledBox.stops.length > 0) {
+      return false;
+    }
+    const stop = source.onOperationSettled((event) => {
+      this.hub.publish(event);
+    });
+    this.settledBox.stops = [stop];
+    return true;
+  }
+
+  rooms(): RoomHub {
+    if (this.subscriptions.length < 1) {
+      throw GraphqlServerError.create("subscriptions are not configured");
+    }
+    return this.hub;
   }
 
   static create(app: FookieApp, options: GraphqlServerOptions = defaultOptions()): GraphqlServer {
@@ -167,6 +226,9 @@ export class GraphqlServer {
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
+    if (String(req.url).startsWith("/stream") === true) {
+      return await this.handleStream(req, res);
+    }
     if (req.method !== "POST") {
       return sendJson(res, 405, { errors: [{ message: "method not allowed" }] }) === false;
     }
@@ -180,10 +242,40 @@ export class GraphqlServer {
     return false;
   }
 
+  private async handleStream(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<boolean> {
+    for (const config of this.subscriptions) {
+      const asked = roomsFromUrl(req.url);
+      if (asked.length < 1) {
+        sendJson(res, 400, { errors: [{ message: "at least one room is required" }] });
+        return false;
+      }
+      const allowed = await config.authorizeRooms(headersOf(req), asked);
+      if (allowed.length < 1) {
+        sendJson(res, 403, { errors: [{ message: "no room was authorized" }] });
+        return false;
+      }
+      openStream(res);
+      const sink = sseSink(res);
+      const membership = this.hub.join(allowed, sink);
+      req.on("close", closerFor(membership));
+      return true;
+    }
+    sendJson(res, 404, { errors: [{ message: "subscriptions are not configured" }] });
+    return false;
+  }
+
   async stop(): Promise<boolean> {
     if (Array.isArray(this.serverBox.servers) === false) {
       throw GraphqlServerError.create("server box required");
     }
+    for (const stop of this.settledBox.stops) {
+      stop.stop();
+    }
+    this.settledBox.stops = [];
+    this.hub.closeAll();
     const running = this.serverBox.servers.slice();
     this.serverBox.servers = [];
     for (const server of running) {

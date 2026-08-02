@@ -74,7 +74,7 @@ export default [
     // which is a shape we control. Same category as the graphql-js quarantine. The pure
     // layers -- registry, naming, schema planning, prefetch, store -- stay under the
     // full rule set, and that is where the real complexity lives.
-    files: ["src/transport.ts", "src/server.ts"],
+    files: ["src/transport.ts", "src/server.ts", "src/subscribe/sse.ts"],
     rules: {
       "fookie/min-function-lines": "off",
       "fookie/no-unknown": "off",

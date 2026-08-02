@@ -69,3 +69,34 @@ export function nameSlotOf(candidate: GraphqlRequestBody["operationName"]): read
   }
   return [parsed.data];
 }
+
+export function roomsFromUrl(rawUrl: http.IncomingMessage["url"]): readonly string[] {
+  const parsed = z.string().min(1).safeParse(rawUrl);
+  if (parsed.success === false) {
+    return [];
+  }
+  const url = new URL(parsed.data, "http://local");
+  let rooms: readonly string[] = [];
+  for (const room of url.searchParams.getAll("room")) {
+    if (room.length < 1) {
+      continue;
+    }
+    rooms = appendItem(rooms, room);
+  }
+  return rooms;
+}
+
+export function headersOf(req: http.IncomingMessage): Record<string, readonly string[]> {
+  const bag: Record<string, readonly string[]> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      bag[key] = value;
+      continue;
+    }
+    const single = z.string().safeParse(value);
+    if (single.success === true) {
+      bag[key] = [single.data];
+    }
+  }
+  return bag;
+}

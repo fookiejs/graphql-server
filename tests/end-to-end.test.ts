@@ -154,7 +154,12 @@ describe("end to end graphql", { skip: databaseUrl.length === 0 }, () => {
       throw new Error("shop must be created");
     }
 
-    const server = graphqlServer(fookie, { port: ["24771"], limits: [], snapshot: true });
+    const server = graphqlServer(fookie, {
+      port: ["24771"],
+      limits: [],
+      snapshot: true,
+      subscriptions: [],
+    });
     const response = await fetch("http://127.0.0.1:24771", {
       method: "POST",
       headers: { "content-type": "application/json" },

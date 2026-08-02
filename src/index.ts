@@ -25,7 +25,18 @@ export {
 export { chunksOf, defaultLimits, distinct, prefetch } from "./plan/prefetch.ts";
 export type { PrefetchLimits, PrefetchResult, ReadPort, Selection } from "./plan/prefetch.ts";
 export { GraphqlServer, defaultOptions, graphqlServer } from "./server.ts";
-export type { FookieApp, GraphqlServerOptions, SnapshotPort } from "./server.ts";
+export type {
+  AuthorizeRooms,
+  FookieApp,
+  GraphqlServerOptions,
+  SettledSource,
+  SnapshotPort,
+  SubscriptionConfig,
+} from "./server.ts";
+export { RoomHub, maxQueuedPerSink } from "./subscribe/hub.ts";
+export type { Membership, SettledEvent, Sink } from "./subscribe/hub.ts";
+export { frameOf, heartbeatMs, openStream, sseSink } from "./subscribe/sse.ts";
+export type { SseSink } from "./subscribe/sse.ts";
 export { isMutation, parseQuery, runMutation, runQuery } from "./graphql-adapter/run.ts";
 export { readRequest, sendJson } from "./transport.ts";
 export type { GraphqlRequestBody } from "./transport.ts";

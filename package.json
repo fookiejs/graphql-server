@@ -1,0 +1,45 @@
+{
+  "name": "@fookiejs/graphql-server",
+  "version": "0.1.0",
+  "description": "A complete GraphQL server for a fookie app: deep relation traversal without N+1, snapshot-consistent reads, mutations and subscriptions.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:all": "tsc -p tsconfig.lint.json --noEmit",
+    "test": "node --import tsx --test \"tests/*.test.ts\"",
+    "test:ci": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/** --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"tests/*.test.ts\"",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@fookiejs/core": ">=0.2.0"
+  },
+  "dependencies": {
+    "graphql": "^16.11.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@fookiejs/core": "file:../core",
+    "@fookiejs/eslint-plugin": "^0.1.9",
+    "@types/node": "^26.0.1",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^10.6.0",
+    "prettier": "^3.8.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

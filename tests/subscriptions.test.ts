@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { RoomHub, maxQueuedPerSink } from "../src/subscribe/hub.ts";
+import { RoomHub } from "../src/subscribe/hub.ts";
 import type { SettledEvent, Sink } from "../src/subscribe/hub.ts";
-import { frameOf } from "../src/subscribe/sse.ts";
+import { frameOf, maxBufferedBytes } from "../src/subscribe/sse.ts";
 
 function recordingSink(): Sink & { seen: SettledEvent[]; closed: boolean[] } {
   const seen: SettledEvent[] = [];
@@ -114,7 +114,7 @@ describe("sse framing", () => {
     assert.equal("entity" in parsed.data.events, false, "no row data crosses the wire");
   });
 
-  it("caps how much one connection may buffer", () => {
-    assert.equal(maxQueuedPerSink, 256);
+  it("caps buffered bytes, not lifetime deliveries", () => {
+    assert.equal(maxBufferedBytes, 1_048_576);
   });
 });

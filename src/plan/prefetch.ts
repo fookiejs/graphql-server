@@ -106,6 +106,21 @@ function edgeWorkFor(
   return [];
 }
 
+function unknownOnly(
+  store: PrefetchStore,
+  modelName: string,
+  ids: readonly string[],
+): readonly string[] {
+  let missing: readonly string[] = [];
+  for (const id of ids) {
+    if (store.knows(modelName, id)) {
+      continue;
+    }
+    missing = appendItem(missing, id);
+  }
+  return missing;
+}
+
 function parentIdsFor(work: EdgeWork, rows: readonly EntityRecord[]): readonly string[] {
   let ids: readonly string[] = [];
   for (const row of rows) {
@@ -129,20 +144,17 @@ function groupReverse(
   parents: readonly EntityRecord[],
   children: readonly EntityRecord[],
 ): boolean {
+  const byOwner = new Map<string, readonly string[]>();
+  for (const child of children) {
+    for (const owner of relationValueOf(child, work.fieldKey)) {
+      for (const childId of entityIdOf(child)) {
+        byOwner.set(owner, appendItem(byOwner.get(owner) ?? [], childId));
+      }
+    }
+  }
   for (const parent of parents) {
     for (const parentId of entityIdOf(parent)) {
-      let mine: readonly string[] = [];
-      for (const child of children) {
-        for (const owner of relationValueOf(child, work.fieldKey)) {
-          if (owner !== parentId) {
-            continue;
-          }
-          for (const childId of entityIdOf(child)) {
-            mine = appendItem(mine, childId);
-          }
-        }
-      }
-      store.linkMany(parentModel, parentId, work.fieldName, mine);
+      store.linkMany(parentModel, parentId, work.fieldName, byOwner.get(parentId) ?? []);
     }
   }
   return true;
@@ -163,6 +175,20 @@ function groupForward(
     }
   }
   return true;
+}
+
+function knownRows(
+  store: PrefetchStore,
+  modelName: string,
+  ids: readonly string[],
+): readonly EntityRecord[] {
+  let rows: readonly EntityRecord[] = [];
+  for (const id of ids) {
+    for (const row of store.entityAt(modelName, id)) {
+      rows = appendItem(rows, row);
+    }
+  }
+  return rows;
 }
 
 export type PrefetchResult = {
@@ -211,8 +237,9 @@ export async function prefetch(
           }
           const childEntry = graph.entryFor(work.childModel);
           const lookupKey = work.reverse ? work.fieldKey : "id";
+          const wanted = work.reverse ? ids : unknownOnly(store, work.childModel, ids);
           let fetched: readonly EntityRecord[] = [];
-          for (const chunk of chunksOf(ids, limits.maxInChunk)) {
+          for (const chunk of chunksOf(wanted, limits.maxInChunk)) {
             const run = await port.list(
               childEntry.model,
               { [lookupKey]: { in: chunk.slice() } },
@@ -232,10 +259,11 @@ export async function prefetch(
           } else {
             groupForward(store, work, frame.modelName, frame.rows);
           }
-          if (work.children.length > 0 && fetched.length > 0) {
+          const reachable = work.reverse ? fetched : knownRows(store, work.childModel, ids);
+          if (work.children.length > 0 && reachable.length > 0) {
             next = appendItem(next, {
               modelName: work.childModel,
-              rows: fetched,
+              rows: reachable,
               selections: work.children,
             });
           }

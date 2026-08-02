@@ -33,9 +33,16 @@ export type {
   SnapshotPort,
   SubscriptionConfig,
 } from "./server.ts";
-export { RoomHub, maxQueuedPerSink } from "./subscribe/hub.ts";
+export { RoomHub } from "./subscribe/hub.ts";
 export type { Membership, SettledEvent, Sink } from "./subscribe/hub.ts";
-export { frameOf, heartbeatMs, openStream, sseSink } from "./subscribe/sse.ts";
+export {
+  completeFrame,
+  frameOf,
+  heartbeatMs,
+  maxBufferedBytes,
+  openStream,
+  sseSink,
+} from "./subscribe/sse.ts";
 export type { SseSink } from "./subscribe/sse.ts";
 export { isMutation, parseQuery, runMutation, runQuery } from "./graphql-adapter/run.ts";
 export { readRequest, sendJson } from "./transport.ts";

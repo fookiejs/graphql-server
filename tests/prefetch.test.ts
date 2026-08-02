@@ -239,6 +239,23 @@ describe("prefetch batching", () => {
     assert.equal(bookCalls.length, 3, "25 parents at 10 per chunk is three queries");
   });
 
+  it("does not refetch an entity a previous level already loaded", async () => {
+    const port = new RecordingPort(fullTables(3, 2));
+    await prefetch(port, graph, "Author", {}, emptyListPage(), [
+      {
+        field: "books",
+        children: [{ field: "publisher", children: [{ field: "owner", children: [] }] }],
+      },
+      { field: "books", children: [{ field: "publisher", children: [] }] },
+    ]);
+    const publisherCalls = port.calls.filter((call) => call.model === "Publisher");
+    assert.equal(
+      publisherCalls.length,
+      1,
+      "the second branch asks for publishers the first branch already loaded",
+    );
+  });
+
   it("refuses a query deeper than the limit", async () => {
     const port = new RecordingPort(fullTables(2, 1));
     await assert.rejects(

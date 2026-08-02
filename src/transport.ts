@@ -12,9 +12,13 @@ export type GraphqlRequestBody = z.infer<typeof requestSchema>;
 
 export const loopbackHost = "127.0.0.1";
 
+export const maxBodyBytes = 1_048_576;
+
 export function readRequest(req: http.IncomingMessage): Promise<readonly GraphqlRequestBody[]> {
   return new Promise((resolve) => {
     let chunks: readonly Buffer[] = [];
+    let received = 0;
+    let refused = false;
     req.on("data", (chunk: Buffer) => {
       if (Buffer.isBuffer(chunk) === false) {
         return;
@@ -22,9 +26,20 @@ export function readRequest(req: http.IncomingMessage): Promise<readonly Graphql
       if (chunk.length < 1) {
         return;
       }
+      received += chunk.length;
+      if (received > maxBodyBytes) {
+        refused = true;
+        chunks = [];
+        req.destroy();
+        resolve([]);
+        return;
+      }
       chunks = appendItem(chunks, chunk);
     });
     req.on("end", () => {
+      if (refused === true) {
+        return;
+      }
       try {
         const parsed = requestSchema.safeParse(
           JSON.parse(Buffer.concat(chunks.slice()).toString("utf8")),

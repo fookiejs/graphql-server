@@ -230,7 +230,8 @@ export class GraphqlServer {
       return await this.handleStream(req, res);
     }
     if (req.method !== "POST") {
-      return sendJson(res, 405, { errors: [{ message: "method not allowed" }] }) === false;
+      sendJson(res, 405, { errors: [{ message: "method not allowed" }] });
+      return false;
     }
     const bodies = await readRequest(req);
     for (const body of bodies) {

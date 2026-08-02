@@ -1,9 +1,11 @@
 import http from "node:http";
-import { appendItem } from "@fookiejs/core";
-import { maxQueuedPerSink } from "./hub.ts";
 import type { SettledEvent, Sink } from "./hub.ts";
 
 export const heartbeatMs = 15_000;
+
+export const maxBufferedBytes = 1_048_576;
+
+export const completeFrame = `event: complete\ndata: {}\n\n`;
 
 export type SseSink = Sink & {
   queued(): number;
@@ -35,7 +37,7 @@ export function openStream(res: http.ServerResponse): boolean {
 }
 
 export function sseSink(res: http.ServerResponse): SseSink {
-  const state: { sent: readonly string[]; closed: boolean } = { sent: [], closed: false };
+  const state: { closed: boolean } = { closed: false };
   const timer = setInterval(() => {
     if (state.closed === true) {
       return;
@@ -48,14 +50,13 @@ export function sseSink(res: http.ServerResponse): SseSink {
       if (state.closed === true) {
         return false;
       }
-      if (state.sent.length >= maxQueuedPerSink) {
-        res.write("event: complete\ndata: {}\n\n");
+      if (res.writableLength > maxBufferedBytes) {
+        res.write(completeFrame);
         state.closed = true;
         clearInterval(timer);
         res.end();
         return false;
       }
-      state.sent = appendItem(state.sent, event.id);
       res.write(frameOf(event));
       return true;
     },
@@ -70,7 +71,7 @@ export function sseSink(res: http.ServerResponse): SseSink {
       return true;
     },
     queued() {
-      return state.sent.length;
+      return res.writableLength;
     },
   };
 }

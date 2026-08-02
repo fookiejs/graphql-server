@@ -20,8 +20,6 @@ export type Membership = {
   stop(): boolean;
 };
 
-export const maxQueuedPerSink = 256;
-
 function withoutSink(members: readonly Sink[], sink: Sink): readonly Sink[] {
   let kept: readonly Sink[] = [];
   for (const member of members) {

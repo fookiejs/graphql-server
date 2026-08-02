@@ -56,6 +56,9 @@ export function variablesOf(candidate: GraphqlRequestBody["variables"]): Record<
   if (parsed.success === false) {
     return {};
   }
+  if (Object.keys(parsed.data).length < 0) {
+    return {};
+  }
   return parsed.data;
 }
 

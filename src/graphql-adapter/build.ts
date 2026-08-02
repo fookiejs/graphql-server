@@ -16,7 +16,15 @@ import type {
 } from "graphql";
 import type { FilterGroup } from "@fookiejs/core";
 import { z } from "zod";
-import type { EntityRecord } from "@fookiejs/core";
+import type {
+  EntityFieldsOf,
+  EntityRecord,
+  FilterInput,
+  InferCreateBody,
+  ModelDef,
+  ModelFieldsInput,
+  UpdateBody,
+} from "@fookiejs/core";
 import { RegistryError } from "../errors.ts";
 import type { PrefetchStore } from "../plan/store.ts";
 import { fieldPlanFor } from "../naming.ts";
@@ -201,6 +209,143 @@ function resolveOne(
   return null;
 }
 
+export type MutationPort = {
+  create<D extends ModelFieldsInput>(
+    model: ModelDef<D>,
+    body: InferCreateBody<D>,
+  ): Promise<MutationOutcome>;
+  update<D extends ModelFieldsInput>(
+    model: ModelDef<D>,
+    input: { id: string; body: UpdateBody<EntityFieldsOf<D>>; filter: FilterInput },
+  ): Promise<MutationOutcome>;
+  delete<D extends ModelFieldsInput>(
+    model: ModelDef<D>,
+    input: { id: string; filter: FilterInput },
+  ): Promise<MutationOutcome>;
+};
+
+export type MutationOutcome = {
+  signal: string;
+  id: string;
+  runId: string;
+};
+
+export type MutationContext = {
+  port: MutationPort;
+};
+
+function mutationPortOf(context: unknown): MutationPort {
+  if (z.looseObject({}).safeParse(context).success === false) {
+    throw RegistryError.create("mutation context required");
+  }
+  const ctx = context as MutationContext;
+  if (z.instanceof(Function).safeParse(ctx.port?.create).success === false) {
+    throw RegistryError.create("mutation port required");
+  }
+  if (z.instanceof(Function).safeParse(ctx.port?.update).success === false) {
+    throw RegistryError.create("mutation port required");
+  }
+  return ctx.port;
+}
+
+function bodyOf(args: Record<string, unknown>): any {
+  const parsed = z.looseObject({}).safeParse(args.body);
+  if (parsed.success === false) {
+    throw RegistryError.create("mutation body required");
+  }
+  if (Object.keys(parsed.data).length < 0) {
+    throw RegistryError.create("mutation body required");
+  }
+  return parsed.data;
+}
+
+function idOf(args: Record<string, unknown>): string {
+  const parsed = z.string().min(1).safeParse(args.id);
+  if (parsed.success === false) {
+    throw RegistryError.create("mutation id required");
+  }
+  if (parsed.data.length < 1) {
+    throw RegistryError.create("mutation id required");
+  }
+  return parsed.data;
+}
+
+function filterOf(args: Record<string, unknown>): FilterInput {
+  const parsed = z.looseObject({}).safeParse(args.filter);
+  if (parsed.success === false) {
+    return {};
+  }
+  if (Object.keys(parsed.data).length < 0) {
+    return {};
+  }
+  return parsed.data as FilterInput;
+}
+
+const MutationResultType = new GraphQLObjectType({
+  name: "MutationResult",
+  fields: {
+    signal: { type: new GraphQLNonNull(SignalEnum) },
+    id: { type: new GraphQLNonNull(scalarTypeFor("UUID")) },
+    runId: { type: new GraphQLNonNull(GraphQLString) },
+  },
+});
+
+function requireFilter(
+  filters: Map<string, GraphQLInputType>,
+  modelName: string,
+): GraphQLInputType {
+  if (z.string().min(1).safeParse(modelName).success === false) {
+    throw RegistryError.create("model name required");
+  }
+  const found = filters.get(modelName);
+  if (found === undefined) {
+    throw RegistryError.create(`no filter input built for ${modelName}`);
+  }
+  return found;
+}
+
+function requireWrite(
+  writes: Map<string, GraphQLInputObjectType>,
+  modelName: string,
+  shape: string,
+): GraphQLInputObjectType {
+  if (z.string().min(1).safeParse(shape).success === false) {
+    throw RegistryError.create("write shape required");
+  }
+  const found = writes.get(`${modelName}:${shape}`);
+  if (found === undefined) {
+    throw RegistryError.create(`no ${shape} input built for ${modelName}`);
+  }
+  return found;
+}
+
+function writeInputFor(
+  graph: ModelGraph,
+  modelName: string,
+  partial: boolean,
+): GraphQLInputObjectType {
+  const modelEntry = graph.entryFor(modelName);
+  const fields: GraphQLInputFieldConfigMap = {};
+  for (const scalar of modelEntry.scalars) {
+    if (scalar.system) {
+      continue;
+    }
+    const named = scalarTypeFor(scalarTypeNameFor(scalar));
+    fields[scalar.key] = { type: partial ? named : new GraphQLNonNull(named) };
+  }
+  for (const edge of modelEntry.forward) {
+    const named = scalarTypeFor("UUID");
+    fields[edge.fieldKey] = { type: partial ? named : new GraphQLNonNull(named) };
+  }
+  if (Object.keys(fields).length === 0) {
+    fields.id = { type: scalarTypeFor("UUID") };
+  }
+  return new GraphQLInputObjectType({
+    name: `${modelName}${partial ? "Update" : "Create"}Input`,
+    fields,
+  });
+}
+
 export type SchemaBundle = {
   schema: GraphQLSchema;
   rootFields: Map<string, RootFieldInfo>;
@@ -216,6 +361,16 @@ export function buildSchema(graph: ModelGraph): SchemaBundle {
     if (input !== undefined) {
       filterInputs.set(group, input);
     }
+  }
+
+  const modelFilters = new Map<string, GraphQLInputType>();
+  for (const modelEntry of graph.entries()) {
+    modelFilters.set(modelEntry.name, modelFilterFor(graph, modelEntry.name, filterInputs));
+  }
+  const writeInputs = new Map<string, GraphQLInputObjectType>();
+  for (const modelEntry of graph.entries()) {
+    writeInputs.set(`${modelEntry.name}:create`, writeInputFor(graph, modelEntry.name, false));
+    writeInputs.set(`${modelEntry.name}:update`, writeInputFor(graph, modelEntry.name, true));
   }
 
   const objects = new Map<string, GraphQLObjectType>();
@@ -249,7 +404,7 @@ export function buildSchema(graph: ModelGraph): SchemaBundle {
     queryFields[pluralQueryName(modelEntry.name)] = {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
       args: {
-        filter: { type: modelFilterFor(graph, modelEntry.name, filterInputs) },
+        filter: { type: requireFilter(modelFilters, modelEntry.name) },
         limit: { type: GraphQLInt },
         offset: { type: GraphQLInt },
       },
@@ -257,8 +412,51 @@ export function buildSchema(graph: ModelGraph): SchemaBundle {
     };
   }
 
+  const mutationFields: GraphQLFieldConfigMap<unknown, unknown> = {};
+  for (const modelEntry of graph.entries()) {
+    const named = modelEntry.name;
+    const capital = `${named.slice(0, 1).toUpperCase()}${named.slice(1)}`;
+    mutationFields[`create${capital}`] = {
+      type: new GraphQLNonNull(MutationResultType),
+      args: {
+        body: {
+          type: new GraphQLNonNull(requireWrite(writeInputs, named, "create")),
+        },
+      },
+      resolve: async (_source, args, context) =>
+        await mutationPortOf(context).create(graph.entryFor(named).model, bodyOf(args)),
+    };
+    mutationFields[`update${capital}`] = {
+      type: new GraphQLNonNull(MutationResultType),
+      args: {
+        id: { type: new GraphQLNonNull(scalarTypeFor("UUID")) },
+        body: { type: new GraphQLNonNull(requireWrite(writeInputs, named, "update")) },
+        filter: { type: requireFilter(modelFilters, named) },
+      },
+      resolve: async (_source, args, context) =>
+        await mutationPortOf(context).update(graph.entryFor(named).model, {
+          id: idOf(args),
+          body: bodyOf(args),
+          filter: filterOf(args),
+        }),
+    };
+    mutationFields[`delete${capital}`] = {
+      type: new GraphQLNonNull(MutationResultType),
+      args: {
+        id: { type: new GraphQLNonNull(scalarTypeFor("UUID")) },
+        filter: { type: requireFilter(modelFilters, named) },
+      },
+      resolve: async (_source, args, context) =>
+        await mutationPortOf(context).delete(graph.entryFor(named).model, {
+          id: idOf(args),
+          filter: filterOf(args),
+        }),
+    };
+  }
+
   const schema = new GraphQLSchema({
     query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
+    mutation: new GraphQLObjectType({ name: "Mutation", fields: mutationFields }),
   });
   return { schema, rootFields };
 }

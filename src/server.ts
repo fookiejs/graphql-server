@@ -2,8 +2,8 @@ import { z } from "zod";
 import http from "node:http";
 import type { ExecutionResult } from "graphql";
 import { buildSchema } from "./graphql-adapter/build.ts";
-import type { SchemaBundle } from "./graphql-adapter/build.ts";
-import { runQuery } from "./graphql-adapter/run.ts";
+import type { MutationPort, SchemaBundle } from "./graphql-adapter/build.ts";
+import { isMutation, parseQuery, runMutation, runQuery } from "./graphql-adapter/run.ts";
 import { defaultLimits } from "./plan/prefetch.ts";
 import type { PrefetchLimits, ReadPort } from "./plan/prefetch.ts";
 import { ModelGraph } from "./registry.ts";
@@ -16,7 +16,8 @@ export type SnapshotPort = {
 };
 
 export type FookieApp = ReadPort &
-  SnapshotPort & {
+  SnapshotPort &
+  MutationPort & {
     models(): readonly RegisteredModelDef[];
   };
 
@@ -121,6 +122,11 @@ export class GraphqlServer {
       throw GraphqlServerError.create("query required");
     }
     const request = { query, variables, operationName };
+    for (const parsed of parseQuery(query)) {
+      if (isMutation(parsed, operationName[0]) === true) {
+        return await runMutation(this.bundle, this.app, request);
+      }
+    }
     if (this.snapshot === false) {
       return await runQuery(this.bundle, this.graph, this.app, request, this.limits);
     }

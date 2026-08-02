@@ -24,6 +24,7 @@ const relaxedForTests = {
   "fookie/no-map-set-mutation": "off",
   "fookie/no-class-mutation": "off",
   "fookie/no-spread": "off",
+  "fookie/same-type-comparison": "off",
 };
 
 // graphql-js's public surface is saturated with null, undefined, any and unknown:

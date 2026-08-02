@@ -14,4 +14,13 @@ export { filterInputNameFor, filterInputPlanFor, filterOpFieldsFor } from "./sch
 export type { FilterInputPlan, FilterOpField, FilterOperand } from "./schema/filters.ts";
 export { buildSchema } from "./graphql-adapter/build.ts";
 export type { SchemaBundle } from "./graphql-adapter/build.ts";
+export {
+  PrefetchStore,
+  edgeKeyOf,
+  entityIdOf,
+  entityKeyOf,
+  relationValueOf,
+} from "./plan/store.ts";
+export { chunksOf, defaultLimits, distinct, prefetch } from "./plan/prefetch.ts";
+export type { PrefetchLimits, PrefetchResult, ReadPort, Selection } from "./plan/prefetch.ts";
 export { GraphqlServerError, NamingError, QueryTooLargeError, RegistryError } from "./errors.ts";

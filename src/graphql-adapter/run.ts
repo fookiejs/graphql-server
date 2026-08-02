@@ -7,6 +7,8 @@ import {
   validate,
 } from "graphql";
 import type { DocumentNode, ExecutionResult } from "graphql";
+
+export type { ExecutionResult };
 import { emptyListPage } from "@fookiejs/core";
 import type { EntityRecord, ListPage } from "@fookiejs/core";
 import type { ModelGraph } from "../registry.ts";

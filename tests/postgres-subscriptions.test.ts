@@ -99,6 +99,7 @@ describe("subscriptions over sse", { skip: databaseUrl.length === 0 }, () => {
       port: ["24781"],
       limits: [],
       snapshot: true,
+      budget: [],
       subscriptions: [{ authorizeRooms: async (_headers, rooms) => rooms }],
     });
     server.watch(fookie);
@@ -128,6 +129,7 @@ describe("subscriptions over sse", { skip: databaseUrl.length === 0 }, () => {
       port: ["24782"],
       limits: [],
       snapshot: true,
+      budget: [],
       subscriptions: [{ authorizeRooms: async (_headers, rooms) => rooms }],
     });
     server.watch(fookie);
@@ -160,6 +162,7 @@ describe("subscriptions over sse", { skip: databaseUrl.length === 0 }, () => {
       port: ["24783"],
       limits: [],
       snapshot: true,
+      budget: [],
       subscriptions: [{ authorizeRooms: async () => [] }],
     });
     server.watch(fookie);
@@ -178,6 +181,7 @@ describe("subscriptions over sse", { skip: databaseUrl.length === 0 }, () => {
       port: ["24784"],
       limits: [],
       snapshot: true,
+      budget: [],
       subscriptions: [{ authorizeRooms: async (_headers, rooms) => rooms }],
     });
 

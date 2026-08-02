@@ -25,6 +25,8 @@ export {
 export { chunksOf, defaultLimits, distinct, prefetch } from "./plan/prefetch.ts";
 export type { PrefetchLimits, PrefetchResult, ReadPort, Selection } from "./plan/prefetch.ts";
 export { GraphqlServer, defaultOptions, graphqlServer } from "./server.ts";
+export { GateFullError, QueryGate, defaultBudget } from "./gate.ts";
+export type { GateBudget } from "./gate.ts";
 export type {
   AuthorizeRooms,
   FookieApp,

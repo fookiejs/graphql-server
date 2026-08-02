@@ -158,6 +158,7 @@ describe("end to end graphql", { skip: databaseUrl.length === 0 }, () => {
       port: ["24771"],
       limits: [],
       snapshot: true,
+      budget: [],
       subscriptions: [],
     });
     const response = await fetch("http://127.0.0.1:24771", {

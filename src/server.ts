@@ -1,14 +1,16 @@
 import { z } from "zod";
 import http from "node:http";
-import type { ExecutionResult } from "graphql";
 import { buildSchema } from "./graphql-adapter/build.ts";
 import type { MutationPort, SchemaBundle } from "./graphql-adapter/build.ts";
 import { isMutation, parseQuery, runMutation, runQuery } from "./graphql-adapter/run.ts";
+import type { ExecutionResult } from "./graphql-adapter/run.ts";
 import { defaultLimits } from "./plan/prefetch.ts";
 import type { PrefetchLimits, ReadPort } from "./plan/prefetch.ts";
 import { ModelGraph } from "./registry.ts";
 import type { RegisteredModelDef } from "./registry.ts";
 import { GraphqlServerError } from "./errors.ts";
+import { GateFullError, QueryGate, defaultBudget } from "./gate.ts";
+import type { GateBudget } from "./gate.ts";
 import { loopbackHost, nameSlotOf, readRequest, sendJson, variablesOf } from "./transport.ts";
 import { headersOf, roomsFromUrl } from "./transport.ts";
 import { RoomHub } from "./subscribe/hub.ts";
@@ -43,6 +45,7 @@ export type GraphqlServerOptions = {
   limits: readonly PrefetchLimits[];
   snapshot: boolean;
   subscriptions: readonly SubscriptionConfig[];
+  budget: readonly GateBudget[];
 };
 
 export function defaultOptions(): GraphqlServerOptions {
@@ -51,6 +54,7 @@ export function defaultOptions(): GraphqlServerOptions {
     limits: [],
     snapshot: true,
     subscriptions: [],
+    budget: [],
   };
   if (options.port.length > 0) {
     throw GraphqlServerError.create("default options carry no port");
@@ -90,6 +94,19 @@ function closeServer(server: http.Server): Promise<boolean> {
   });
 }
 
+function firstBudget(budgets: readonly GateBudget[]): GateBudget {
+  for (const candidate of budgets) {
+    if (Number.isInteger(candidate.concurrent) === false) {
+      throw GraphqlServerError.create("budget concurrency must be an integer");
+    }
+    if (Number.isInteger(candidate.queued) === false) {
+      throw GraphqlServerError.create("budget queue depth must be an integer");
+    }
+    return candidate;
+  }
+  return defaultBudget();
+}
+
 function firstLimits(limits: readonly PrefetchLimits[]): PrefetchLimits {
   for (const candidate of limits) {
     if (Number.isInteger(candidate.maxDepth) === false) {
@@ -110,6 +127,7 @@ export class GraphqlServer {
   private readonly hub = new RoomHub();
   private readonly subscriptions: readonly SubscriptionConfig[];
   private readonly settledBox: { stops: readonly { stop(): boolean }[] } = { stops: [] };
+  private readonly gate: QueryGate;
 
   private constructor(app: FookieApp, options: GraphqlServerOptions) {
     if (app.models().length < 1) {
@@ -121,6 +139,21 @@ export class GraphqlServer {
     this.limits = firstLimits(options.limits);
     this.snapshot = options.snapshot;
     this.subscriptions = options.subscriptions;
+    this.gate = QueryGate.create(firstBudget(options.budget));
+  }
+
+  inFlight(): number {
+    if (this.gate.active() < 0) {
+      throw GraphqlServerError.create("in flight count cannot be negative");
+    }
+    return this.gate.active();
+  }
+
+  queued(): number {
+    if (this.gate.waiting() < 0) {
+      throw GraphqlServerError.create("queued count cannot be negative");
+    }
+    return this.gate.waiting();
   }
 
   watch(source: SettledSource): boolean {
@@ -187,10 +220,15 @@ export class GraphqlServer {
       }
     }
     if (this.snapshot === false) {
-      return await runQuery(this.bundle, this.graph, this.app, request, this.limits);
+      return await this.gate.run(
+        async () => await runQuery(this.bundle, this.graph, this.app, request, this.limits),
+      );
     }
-    return await this.app.withReadSnapshot(
-      async (scope) => await runQuery(this.bundle, this.graph, scope, request, this.limits),
+    return await this.gate.run(
+      async () =>
+        await this.app.withReadSnapshot(
+          async (scope) => await runQuery(this.bundle, this.graph, scope, request, this.limits),
+        ),
     );
   }
 
@@ -236,8 +274,17 @@ export class GraphqlServer {
     const bodies = await readRequest(req);
     for (const body of bodies) {
       const names = nameSlotOf(body.operationName);
-      const answered = await this.execute(body.query, variablesOf(body.variables), names);
-      return sendJson(res, 200, answered);
+      try {
+        const answered = await this.execute(body.query, variablesOf(body.variables), names);
+        return sendJson(res, 200, answered);
+      } catch (caught) {
+        if (caught instanceof GateFullError === false) {
+          throw caught;
+        }
+        res.setHeader("retry-after", "1");
+        sendJson(res, 503, { errors: [{ message: caught.message }] });
+        return false;
+      }
     }
     sendJson(res, 400, { errors: [{ message: "invalid graphql request" }] });
     return false;

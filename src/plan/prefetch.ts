@@ -137,6 +137,18 @@ function parentIdsFor(work: EdgeWork, rows: readonly EntityRecord[]): readonly s
   return distinct(ids);
 }
 
+function ownedChildren(index: Record<string, readonly string[]>, owner: string): readonly string[] {
+  const known = index[owner];
+  const parsed = z.array(z.string()).safeParse(known);
+  if (parsed.success === false) {
+    return [];
+  }
+  if (parsed.data.length < 1) {
+    return [];
+  }
+  return parsed.data;
+}
+
 function groupReverse(
   store: PrefetchStore,
   work: EdgeWork,
@@ -144,17 +156,17 @@ function groupReverse(
   parents: readonly EntityRecord[],
   children: readonly EntityRecord[],
 ): boolean {
-  const byOwner = new Map<string, readonly string[]>();
+  const byOwner: Record<string, readonly string[]> = {};
   for (const child of children) {
     for (const owner of relationValueOf(child, work.fieldKey)) {
       for (const childId of entityIdOf(child)) {
-        byOwner.set(owner, appendItem(byOwner.get(owner) ?? [], childId));
+        byOwner[owner] = appendItem(ownedChildren(byOwner, owner), childId);
       }
     }
   }
   for (const parent of parents) {
     for (const parentId of entityIdOf(parent)) {
-      store.linkMany(parentModel, parentId, work.fieldName, byOwner.get(parentId) ?? []);
+      store.linkMany(parentModel, parentId, work.fieldName, ownedChildren(byOwner, parentId));
     }
   }
   return true;

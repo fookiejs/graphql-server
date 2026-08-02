@@ -15,7 +15,10 @@ import type {
   GraphQLOutputType,
 } from "graphql";
 import type { FilterGroup } from "@fookiejs/core";
+import { z } from "zod";
+import type { EntityRecord } from "@fookiejs/core";
 import { RegistryError } from "../errors.ts";
+import type { PrefetchStore } from "../plan/store.ts";
 import { fieldPlanFor } from "../naming.ts";
 import type { ModelGraph } from "../registry.ts";
 import { filterInputNameFor, filterOpFieldsFor } from "../schema/filters.ts";
@@ -86,11 +89,127 @@ function filterInputFor(group: FilterGroup): GraphQLInputObjectType | undefined 
   return new GraphQLInputObjectType({ name: filterInputNameFor(group), fields });
 }
 
-export type SchemaBundle = {
-  schema: GraphQLSchema;
+export type ExecutionContext = {
+  store: PrefetchStore;
+  roots: Map<string, readonly EntityRecord[]>;
 };
 
+function storeOf(context: unknown): ExecutionContext {
+  if (z.looseObject({}).safeParse(context).success === false) {
+    throw RegistryError.create("execution context required");
+  }
+  const ctx = context as ExecutionContext;
+  if (z.instanceof(Map).safeParse(ctx.roots).success === false) {
+    throw RegistryError.create("execution context roots required");
+  }
+  return ctx;
+}
+
+function idSlotOf(source: unknown): readonly string[] {
+  const parsed = z.looseObject({ id: z.string().min(1) }).safeParse(source);
+  if (parsed.success === false) {
+    return [];
+  }
+  if (parsed.data.id.length < 1) {
+    return [];
+  }
+  return [parsed.data.id];
+}
+
+function countSlotOf(candidate: unknown): readonly number[] {
+  const parsed = z.number().int().nonnegative().safeParse(candidate);
+  if (parsed.success === false) {
+    return [];
+  }
+  if (Number.isInteger(parsed.data) === false) {
+    return [];
+  }
+  return [parsed.data];
+}
+
+function responseKeyOf(fieldInfo: { path: { key: string | number } }): string {
+  const key = String(fieldInfo.path.key);
+  if (key.length < 1) {
+    throw RegistryError.create("root response key required");
+  }
+  if (z.string().min(1).safeParse(key).success === false) {
+    throw RegistryError.create("root response key required");
+  }
+  return key;
+}
+
+function resolveRootMany(context: unknown, fieldInfo: { path: { key: string | number } }): unknown {
+  const ctx = storeOf(context);
+  const key = responseKeyOf(fieldInfo);
+  const rows = ctx.roots.get(key);
+  if (rows === undefined) {
+    return [];
+  }
+  return rows;
+}
+
+function resolveRootSingle(
+  context: unknown,
+  fieldInfo: { path: { key: string | number } },
+): unknown {
+  const ctx = storeOf(context);
+  const key = responseKeyOf(fieldInfo);
+  const rows = ctx.roots.get(key);
+  if (rows === undefined) {
+    return null;
+  }
+  return rows[0] ?? null;
+}
+
+function resolveMany(
+  context: unknown,
+  parentModel: string,
+  source: unknown,
+  fieldName: string,
+  childModel: string,
+  args: Record<string, unknown>,
+): unknown {
+  const ctx = storeOf(context);
+  for (const id of idSlotOf(source)) {
+    const rows = ctx.store.linkedRows(parentModel, id, fieldName, childModel);
+    let start = 0;
+    for (const offset of countSlotOf(args.offset)) {
+      start = offset;
+    }
+    for (const limit of countSlotOf(args.limit)) {
+      return rows.slice(start, start + limit);
+    }
+    return rows.slice(start);
+  }
+  return [];
+}
+
+function resolveOne(
+  context: unknown,
+  parentModel: string,
+  source: unknown,
+  fieldName: string,
+  childModel: string,
+): unknown {
+  const ctx = storeOf(context);
+  if (z.string().min(1).safeParse(fieldName).success === false) {
+    throw RegistryError.create("relation field required");
+  }
+  for (const id of idSlotOf(source)) {
+    return ctx.store.linkedRows(parentModel, id, fieldName, childModel)[0] ?? null;
+  }
+  return null;
+}
+
+export type SchemaBundle = {
+  schema: GraphQLSchema;
+  rootFields: Map<string, RootFieldInfo>;
+};
+
+export type RootFieldInfo = { modelName: string; single: boolean };
+
 export function buildSchema(graph: ModelGraph): SchemaBundle {
+  const rootFields = new Map<string, RootFieldInfo>();
   const filterInputs = new Map<string, GraphQLInputObjectType>();
   for (const group of allGroups) {
     const input = filterInputFor(group);
@@ -116,9 +235,16 @@ export function buildSchema(graph: ModelGraph): SchemaBundle {
     if (objectType === undefined) {
       continue;
     }
-    queryFields[lowerFirst(modelEntry.name)] = {
+    const singleKey = lowerFirst(modelEntry.name);
+    rootFields.set(singleKey, { modelName: modelEntry.name, single: true });
+    rootFields.set(pluralQueryName(modelEntry.name), {
+      modelName: modelEntry.name,
+      single: false,
+    });
+    queryFields[singleKey] = {
       type: objectType,
       args: { id: { type: new GraphQLNonNull(scalarTypeFor("UUID")) } },
+      resolve: (_source, _args, context, fieldInfo) => resolveRootSingle(context, fieldInfo),
     };
     queryFields[pluralQueryName(modelEntry.name)] = {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
@@ -127,13 +253,14 @@ export function buildSchema(graph: ModelGraph): SchemaBundle {
         limit: { type: GraphQLInt },
         offset: { type: GraphQLInt },
       },
+      resolve: (_source, _args, context, fieldInfo) => resolveRootMany(context, fieldInfo),
     };
   }
 
   const schema = new GraphQLSchema({
     query: new GraphQLObjectType({ name: "Query", fields: queryFields }),
   });
-  return { schema };
+  return { schema, rootFields };
 }
 
 function lowerFirst(name: string): string {
@@ -209,14 +336,22 @@ function objectFieldsFor(
       if (related === undefined) {
         continue;
       }
+      const fieldName = plan.name;
+      const childModel = farSide;
       if (plan.reverse) {
-        fields[plan.name] = {
+        fields[fieldName] = {
           type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(related))),
           args: { limit: { type: GraphQLInt }, offset: { type: GraphQLInt } },
+          resolve: (source, args, context) =>
+            resolveMany(context, modelName, source, fieldName, childModel, args),
         };
         continue;
       }
-      fields[plan.name] = { type: related };
+      fields[fieldName] = {
+        type: related,
+        resolve: (source, _args, context) =>
+          resolveOne(context, modelName, source, fieldName, childModel),
+      };
     }
   }
   return fields;

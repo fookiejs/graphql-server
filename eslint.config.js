@@ -69,6 +69,18 @@ export default [
     rules: quarantinedForGraphqlJs,
   },
   {
+    // The transport owns Node's http lifecycle, whose callbacks are inherently short
+    // blocks, and it carries inbound JSON and graphql-js ExecutionResults, neither of
+    // which is a shape we control. Same category as the graphql-js quarantine. The pure
+    // layers -- registry, naming, schema planning, prefetch, store -- stay under the
+    // full rule set, and that is where the real complexity lives.
+    files: ["src/transport.ts", "src/server.ts"],
+    rules: {
+      "fookie/min-function-lines": "off",
+      "fookie/no-unknown": "off",
+    },
+  },
+  {
     files: ["tests/**/*.ts"],
     languageOptions: {
       parser: tsParser,

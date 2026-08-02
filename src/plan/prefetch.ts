@@ -178,11 +178,12 @@ export async function prefetch(
   rootPage: ListPage,
   selections: readonly Selection[],
   limits: PrefetchLimits = defaultLimits(),
+  shared: PrefetchStore = new PrefetchStore(),
 ): Promise<PrefetchResult> {
   if (z.string().min(1).safeParse(rootModel).success === false) {
     throw RegistryError.create("root model required");
   }
-  const store = new PrefetchStore();
+  const store = shared;
   const rootEntry = graph.entryFor(rootModel);
   const rootRun = await port.list(rootEntry.model, rootFilter, rootPage);
   let rowsRead = rootRun.results.length;

@@ -41,6 +41,11 @@ const quarantinedForGraphqlJs = {
   "fookie/no-nullish-operators": "off",
   "fookie/no-union-type": "off",
   "fookie/no-spread": "off",
+  // graphql-js resolves circular type references through field thunks, which are
+  // closures created while iterating the model list, and it builds its type
+  // registry incrementally. Both are forced by the library's shape, not chosen.
+  "fookie/no-loop-func": "off",
+  "fookie/no-map-set-mutation": "off",
 };
 
 export default [

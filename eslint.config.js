@@ -1,8 +1,6 @@
 import fookie from "@fookiejs/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 
-// Same carve-out core uses: test bodies are short arrow callbacks that legitimately
-// construct absent values, and node:test's describe/it return promises nobody awaits.
 const relaxedForTests = {
   "fookie/no-async-without-await": "off",
   "fookie/min-function-lines": "off",
@@ -27,13 +25,6 @@ const relaxedForTests = {
   "fookie/same-type-comparison": "off",
 };
 
-// graphql-js's public surface is saturated with null, undefined, any and unknown:
-// GraphQLField.description is Maybe<string>, resolvers return unknown, args are any.
-// Those types are not ours to change, and satisfying the house rules against them
-// would cost more than the rest of this package combined. Every line that touches
-// graphql-js lives in src/graphql-adapter/**, presents slot-style signatures to the
-// rest of the package, and relaxes exactly the rules its dependency forces.
-// Nothing else in src/ gets this treatment. Keep this directory small.
 const quarantinedForGraphqlJs = {
   "fookie/no-null-undefined": "off",
   "fookie/no-unknown": "off",
@@ -42,9 +33,6 @@ const quarantinedForGraphqlJs = {
   "fookie/no-nullish-operators": "off",
   "fookie/no-union-type": "off",
   "fookie/no-spread": "off",
-  // graphql-js resolves circular type references through field thunks, which are
-  // closures created while iterating the model list, and it builds its type
-  // registry incrementally. Both are forced by the library's shape, not chosen.
   "fookie/no-loop-func": "off",
   "fookie/no-map-set-mutation": "off",
 };
@@ -69,11 +57,6 @@ export default [
     rules: quarantinedForGraphqlJs,
   },
   {
-    // The transport owns Node's http lifecycle, whose callbacks are inherently short
-    // blocks, and it carries inbound JSON and graphql-js ExecutionResults, neither of
-    // which is a shape we control. Same category as the graphql-js quarantine. The pure
-    // layers -- registry, naming, schema planning, prefetch, store -- stay under the
-    // full rule set, and that is where the real complexity lives.
     files: ["src/transport.ts", "src/server.ts", "src/subscribe/sse.ts"],
     rules: {
       "fookie/min-function-lines": "off",

@@ -15,7 +15,6 @@ concurrency:
 
 env:
   NODE_VERSION_PRIMARY: "24"
-  CORE_REF: "main"
 
 jobs:
   static:
@@ -23,45 +22,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          path: graphql-server
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: fookiejs/core
-          ref: ${{ env.CORE_REF }}
-          path: core
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION_PRIMARY }}
 
-      - name: build the linked core
-        working-directory: core
-        run: |
-          npm ci
-          npm run build
-
-      - name: install
-        working-directory: graphql-server
-        run: npm ci
+      - run: npm ci
 
       - name: lint
-        working-directory: graphql-server
         run: npm run lint
       - name: format
-        working-directory: graphql-server
         run: npm run format:check
       - name: typecheck (src, must be clean)
-        working-directory: graphql-server
         run: npm run typecheck
       - name: typecheck (src + tests)
-        working-directory: graphql-server
         run: npm run typecheck:all
       - name: build
-        working-directory: graphql-server
         run: npm run build
 
       - name: published package contains only dist
-        working-directory: graphql-server
         run: |
           npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
           node -e "
@@ -96,29 +74,13 @@ jobs:
       FOOKIE_TEST_DATABASE: postgres://postgres:postgres@localhost:5432/fookie_graphql_test
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          path: graphql-server
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: fookiejs/core
-          ref: ${{ env.CORE_REF }}
-          path: core
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
 
-      - name: build the linked core
-        working-directory: core
-        run: |
-          npm ci
-          npm run build
-
-      - name: install
-        working-directory: graphql-server
-        run: npm ci
+      - run: npm ci
 
       - name: prove postgres is reachable
-        working-directory: graphql-server
         run: |
           node -e '
             const pg = require("pg");
@@ -130,7 +92,6 @@ jobs:
           '
 
       - name: run tests
-        working-directory: graphql-server
         run: npm test
 
   invariants:

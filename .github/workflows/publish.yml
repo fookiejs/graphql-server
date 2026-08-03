@@ -71,24 +71,30 @@ jobs:
             console.log(files.length + ' files, all under dist/');
           "
 
-      # Releases are deliberate: package.json names the version, and republishing one
-      # that already exists fails loudly instead of silently bumping past it.
+      # Releases are deliberate: package.json names the version. A push whose version is
+      # already on npm is not a release, so publishing is skipped rather than failed — the
+      # gates above still ran. A real release always moves the version, so nothing is missed.
       - name: read the version being released
         id: version
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if npm view "@fookiejs/graphql-server@$VERSION" version >/dev/null 2>&1; then
-            echo "@fookiejs/graphql-server@$VERSION is already published; bump package.json first"
-            exit 1
+            echo "@fookiejs/graphql-server@$VERSION is already on npm, so this push is not a release."
+            echo "Nothing to publish. Bump the version in package.json to cut one."
+            echo "release=no" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "release=yes" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: publish to npm
+        if: steps.version.outputs.release == 'yes'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: tag the release
+        if: steps.version.outputs.release == 'yes'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
